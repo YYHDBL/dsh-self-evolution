@@ -101,8 +101,8 @@ A1 ─ A2 ─ A3 ─ ✦A            阶段 A：基线与新版适配
 
 - **前置**：A2。
 - **涉及文件**：`packages/evolution-probe/package.json`、`src/index.ts`、`src/client/index.ts`、`tests/host.spec.ts`、`tests/client.spec.ts`、`tsdown.config.ts`、`cordis.patch.yml`；项目根 `package.json`（vitest link 改指 `vendor/dsh-0.1.6`）。
-- **具体改动**：
-  1. `package.json`：peerDeps 改为 `@deepseek-ai/cordis`（对齐 `vendor/dsh-0.1.6/vendor/cordis` 实际版本 `4.0.2`）、`@deepseek-ai/dsh-session`、`@deepseek-ai/dsh-client-ui-conversation`（`0.1.6-alpha.2`）；**删除** `@deepseek-ai/dsh-client-runtime`；`dsh.client.inject` 依赖数组按新版客户端清单机制改为 `["@deepseek-ai/dsh-client-ui-renderer"]`（以 C 阶段前的实机核对为准，先按此写、装载失败即修正）；devDeps link 全部改指 `vendor/dsh-0.1.6` 对应目录。
+- **具体改动**（✦A 执行结论回填：已按官方"无构建最小包形态"完成——新版 `clientBundle` tsdown 预设只能解析 vendor 仓库内包（`REPOSITORY_ROOT` 硬编码），外部包的正规路径是创造模式技能文档的 plain-JS `index.js` + `client.js`（`__ModuleLoader__.load` 工厂，React 走浏览器模块表），无需构建工具；证据见 `artifacts/milestone-0/ddefc45/A3-probe-adaptation.md`）：
+  1. ~~`package.json` peerDeps/devDeps 改指新 vendor + tsdown 构建~~ → 包形态改为 `index.js`/`client.js` 双文件（官方最小形态），peerDeps `cordis 4.0.2` + `dsh-session 0.1.6-alpha.2`，devDeps（仅测试用）link 指向 `vendor/dsh-0.1.6`；`dsh.client` 为 `{ platform: web, immediately: true, inject: ["@deepseek-ai/dsh-client-ui-conversation"] }`。
   2. `src/index.ts`（宿主）：逻辑不变（`turn/end` → 追加 JSONL），类型导入按新版 `@deepseek-ai/dsh-session` 校验 `SessionEvent` 形状；`turn/end` 载荷为 `{ turn, reason }`（`packages/core/session/src/types.ts:285`）。
   3. `src/client/index.ts`：`ClientContext` 旧来源已删除；改为从 `@deepseek-ai/dsh-client-ui-renderer/client` 导入 `SlotRegistry` 类型，插槽注册按新版 `SlotRegistry` 签名重写（保持 `conversation.composer.dock` + `<strong role="status">自进化：记录中</strong>` 渲染不变）。**精确签名以 `vendor/dsh-0.1.6/packages/client/ui-conversation/src/client/` 现存客户端插件写法为模板对照**（本轮已确认该模式存在：`export { apply, Config, inject }`），不凭记忆猜。
   4. 测试：host 用例改用新版 Cordis 测试上下文与 `SessionStore`（保持"单条 turn/end 追加一行"断言）；client 用例改导入路径，断言插槽注册与组件渲染。

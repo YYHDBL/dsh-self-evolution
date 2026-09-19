@@ -9,23 +9,23 @@ importers:
   .:
     devDependencies:
       vitest:
-        specifier: link:vendor/deepseek-harness/node_modules/vitest
-        version: link:vendor/deepseek-harness/node_modules/vitest
+        specifier: link:vendor/dsh-0.1.6/node_modules/vitest
+        version: link:vendor/dsh-0.1.6/node_modules/vitest
 
   packages/evolution-probe:
     devDependencies:
       '@deepseek-ai/cordis':
-        specifier: link:../../vendor/deepseek-harness/vendor/cordis
-        version: link:../../vendor/deepseek-harness/vendor/cordis
-      '@deepseek-ai/dsh-client-runtime':
-        specifier: link:../../vendor/deepseek-harness/packages/client/runtime
-        version: link:../../vendor/deepseek-harness/packages/client/runtime
+        specifier: link:../../vendor/dsh-0.1.6/vendor/cordis
+        version: link:../../vendor/dsh-0.1.6/vendor/cordis
       '@deepseek-ai/dsh-client-ui-conversation':
-        specifier: link:../../vendor/deepseek-harness/packages/client/ui-conversation
-        version: link:../../vendor/deepseek-harness/packages/client/ui-conversation
+        specifier: link:../../vendor/dsh-0.1.6/packages/client/ui-conversation
+        version: link:../../vendor/dsh-0.1.6/packages/client/ui-conversation
+      '@deepseek-ai/dsh-client-ui-renderer':
+        specifier: link:../../vendor/dsh-0.1.6/packages/client/ui-renderer
+        version: link:../../vendor/dsh-0.1.6/packages/client/ui-renderer
       '@deepseek-ai/dsh-session':
-        specifier: link:../../vendor/deepseek-harness/packages/core/session
-        version: link:../../vendor/deepseek-harness/packages/core/session
+        specifier: link:../../vendor/dsh-0.1.6/packages/core/session
+        version: link:../../vendor/dsh-0.1.6/packages/core/session
       react:
-        specifier: link:../../vendor/deepseek-harness/packages/client/ui-conversation/node_modules/react
-        version: link:../../vendor/deepseek-harness/packages/client/ui-conversation/node_modules/react
+        specifier: link:../../vendor/dsh-0.1.6/packages/client/ui-conversation/node_modules/react
+        version: link:../../vendor/dsh-0.1.6/packages/client/ui-conversation/node_modules/react

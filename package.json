@@ -6,6 +6,6 @@
     "test": "vitest run packages/evolution-probe/tests"
   },
   "devDependencies": {
-    "vitest": "link:vendor/deepseek-harness/node_modules/vitest"
+    "vitest": "link:vendor/dsh-0.1.6/node_modules/vitest"
   }
 }

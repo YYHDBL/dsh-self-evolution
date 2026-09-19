@@ -1,12 +1,25 @@
 // @vitest-environment jsdom
 
 import { Context } from '@deepseek-ai/cordis'
-import { SlotRegistry } from '@deepseek-ai/dsh-client-runtime/src/client/slots.ts'
+import { SlotRegistry } from '@deepseek-ai/dsh-client-ui-renderer/src/client/registry.ts'
 import { describe, expect, it } from 'vitest'
-import * as EvolutionProbeClient from '../src/client/index.ts'
+import * as React from 'react'
 
-describe('evolution probe client plugin', () => {
-  it('shows and removes the persistent recording status with its plugin lifecycle', async () => {
+describe('evolution probe client module (shipped artifact)', () => {
+  it('registers and removes the persistent recording status with its plugin lifecycle', async () => {
+    const loader = (window as unknown as { __ModuleLoader__?: { load: (m: unknown) => void } })
+    let loaded: { id: string; factory: (require: (name: string) => unknown) => unknown } | undefined
+    loader.__ModuleLoader__ = { load: (m) => { loaded = m as typeof loaded } }
+    await import('../client.js')
+    expect(loaded).toBeDefined()
+    expect(loaded!.id).toBe('@self-evolving/evolution-probe')
+
+    const moduleTable = (name: string) => {
+      if (name === 'react') return React
+      throw new Error(`test module table: unexpected require '${name}'`)
+    }
+    const clientPlugin = loaded!.factory(moduleTable) as { inject: string[]; apply: (ctx: Context) => void }
+
     const ctx = new Context()
     await ctx.plugin(SlotRegistry).await()
     const slots = ctx.get('slots') as SlotRegistry
@@ -17,7 +30,7 @@ describe('evolution probe client plugin', () => {
       },
     } as never, () => null)
 
-    const fiber = ctx.plugin(EvolutionProbeClient)
+    const fiber = ctx.plugin(clientPlugin)
     await fiber.await()
     const entry = slots.entries('conversation.composer.dock').find(item => item.options.id === 'evolution-recording')
     expect(entry).toBeDefined()

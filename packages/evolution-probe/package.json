@@ -3,47 +3,32 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "main": "lib/index.js",
   "exports": {
-    ".": "./lib/index.js",
-    "./client": "./lib/client.js",
+    ".": "./index.js",
+    "./client": "./client.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
-    "./package.json": "./package.json",
-    "./src/*": "./src/*"
+    "./package.json": "./package.json"
   },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
     },
     "client": {
+      "platform": "web",
+      "immediately": true,
       "inject": [
-        "@deepseek-ai/dsh-client-runtime",
         "@deepseek-ai/dsh-client-ui-conversation"
-      ],
-      "platform": "web"
+      ]
     }
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "4.0.1",
-    "@deepseek-ai/dsh-client-runtime": "0.1.0-rc.5",
-    "@deepseek-ai/dsh-client-ui-conversation": "0.1.0-rc.5",
-    "@deepseek-ai/dsh-session": "0.1.0-rc.5",
-    "react": "^18.3.1"
+    "@deepseek-ai/cordis": "4.0.2",
+    "@deepseek-ai/dsh-session": "0.1.6-alpha.2"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "link:../../vendor/deepseek-harness/vendor/cordis",
-    "@deepseek-ai/dsh-client-runtime": "link:../../vendor/deepseek-harness/packages/client/runtime",
-    "@deepseek-ai/dsh-client-ui-conversation": "link:../../vendor/deepseek-harness/packages/client/ui-conversation",
-    "@deepseek-ai/dsh-session": "link:../../vendor/deepseek-harness/packages/core/session",
-    "react": "link:../../vendor/deepseek-harness/packages/client/ui-conversation/node_modules/react"
-  },
-  "scripts": {
-    "build": "../../vendor/deepseek-harness/node_modules/.bin/tsdown"
-  },
-  "files": [
-    "lib/index.js",
-    "lib/client.js",
-    "lib/client.js.map",
-    "cordis.patch.yml"
-  ]
+    "@deepseek-ai/cordis": "link:../../vendor/dsh-0.1.6/vendor/cordis",
+    "@deepseek-ai/dsh-client-ui-renderer": "link:../../vendor/dsh-0.1.6/packages/client/ui-renderer",
+    "@deepseek-ai/dsh-session": "link:../../vendor/dsh-0.1.6/packages/core/session",
+    "react": "link:../../vendor/dsh-0.1.6/packages/client/ui-conversation/node_modules/react"
+  }
 }
