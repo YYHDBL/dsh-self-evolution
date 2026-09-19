@@ -1,0 +1,17 @@
+# Milestone Zero evidence — target baseline ddefc45
+
+Index of acceptance evidence for target commit `ddefc45fbc7f8e46dd73185e68295696d1297887`
+(`0.1.6-alpha.2`). The August records in [../README.md](../README.md) remain the
+historical evidence for the old baseline `47f9438` and are not reused here.
+
+| Task | Evidence | Status |
+|---|---|---|
+| A1 repo baseline | commit history of this repository | see git log |
+| A2 build & boot baseline | `A2-build-boot.md`, `A2-logupload-off.md`, `A2-v3-migration.md` | per-file status |
+| A2/P5 CLI probe | recorded in `A2-build-boot.md` | — |
+| A2/P6 upload-off config | `A2-logupload-off.md` | per-file status |
+| A2/P1 standalone persistence (via V3 migration script) | `A2-v3-migration.md` | per-file status |
+| A3 probe adaptation | `A3-probe-adaptation.md` | per-file status |
+
+Rules: every record states what actually ran and what did not; simulated or
+partial results are never recorded as passed acceptance.

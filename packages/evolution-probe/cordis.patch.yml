@@ -1,0 +1,5 @@
+- insert:
+    - id: evolution-probe
+      name: '@self-evolving/evolution-probe'
+      config:
+        path: '/Users/yyhdbl/Desktop/自进化harness项目/state/turns.jsonl'

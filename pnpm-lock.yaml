@@ -1,0 +1,31 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    devDependencies:
+      vitest:
+        specifier: link:vendor/deepseek-harness/node_modules/vitest
+        version: link:vendor/deepseek-harness/node_modules/vitest
+
+  packages/evolution-probe:
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: link:../../vendor/deepseek-harness/vendor/cordis
+        version: link:../../vendor/deepseek-harness/vendor/cordis
+      '@deepseek-ai/dsh-client-runtime':
+        specifier: link:../../vendor/deepseek-harness/packages/client/runtime
+        version: link:../../vendor/deepseek-harness/packages/client/runtime
+      '@deepseek-ai/dsh-client-ui-conversation':
+        specifier: link:../../vendor/deepseek-harness/packages/client/ui-conversation
+        version: link:../../vendor/deepseek-harness/packages/client/ui-conversation
+      '@deepseek-ai/dsh-session':
+        specifier: link:../../vendor/deepseek-harness/packages/core/session
+        version: link:../../vendor/deepseek-harness/packages/core/session
+      react:
+        specifier: link:../../vendor/deepseek-harness/packages/client/ui-conversation/node_modules/react
+        version: link:../../vendor/deepseek-harness/packages/client/ui-conversation/node_modules/react
