@@ -143,6 +143,7 @@ for (let attempt = 1; attempt <= 2; attempt++) {
         fail(1, `recover-baseline refused: ${error.message}; not retrying`)
       }
     } else {
+      try { writeFileSync(join(STATE, 'launcher-last-failure.json'), JSON.stringify({ atUtc: new Date().toISOString(), why: result.why, childLog: (result.log ?? '').slice(-4000) }, null, 2)) } catch { /* best effort */ }
       fail(1, 'no safe recovery target (empty or absent previous baseline; fault likely in the profile itself); keeping diagnostics, not retrying')
     }
   }

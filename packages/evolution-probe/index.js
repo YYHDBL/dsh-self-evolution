@@ -33,22 +33,34 @@ export function apply(ctx, config) {
   // control file; memory/skill/config artifacts compare on-disk sha256 vs digest.
   if (stateDir && bootId) {
     const healthPath = join(stateDir, 'launcher-health.json')
-    const writeHealth = () => {
+    const pluginStatus = async (id) => {
+      try {
+        const pm = ctx.get('pluginManager')
+        if (!pm?.listPlugins) return { activated: false, evidence: 'pluginManager-unavailable' }
+        const plugins = await pm.listPlugins() // async: awaiting is the point
+        const found = plugins.find(p => p.id === id || p.name === id)
+        return found
+          ? { activated: found.status !== 'failed', evidence: `pluginManager:${found.status ?? 'loaded'}` }
+          : { activated: false, evidence: 'not-listed' }
+      } catch { return { activated: false, evidence: 'pluginManager-unavailable' } }
+    }
+    const writeHealth = async () => {
       try {
         const artifacts = [{ id: 'evolution-probe', kind: 'plugin', expected: true, activated: true, evidence: 'self-active' }]
         const control = join(stateDir, 'control.json')
-        if (existsSync(control)) {
-          const parsed = JSON.parse(readFileSync(control, 'utf8'))
+        let parsed = null
+        try { parsed = JSON.parse(readFileSync(control, 'utf8')) }
+        catch (error) {
+          if (existsSync(control)) {
+            // Corrupt control file: the launcher started an empty managed set;
+            // health must reflect that (empty expected set), not abort entirely.
+            artifacts.push({ id: '(control-file)', kind: 'config', expected: false, activated: false, evidence: `control-corrupt: ${error.message}` })
+          }
+        }
+        if (parsed) {
           for (const entry of parsed.baseline?.entries ?? []) {
             if (entry.kind === 'plugin') {
-              let activated = false
-              let evidence = 'activation-unknown'
-              try {
-                const pm = ctx.get('pluginManager')
-                const found = pm ? (pm.listPlugins?.() ?? []).find(p => p.id === entry.id || p.name === entry.id) : undefined
-                activated = Boolean(found && found.status !== 'failed')
-                evidence = found ? `pluginManager:${found.status ?? 'loaded'}` : 'not-listed'
-              } catch { evidence = 'pluginManager-unavailable' }
+              const { activated, evidence } = await pluginStatus(entry.id)
               artifacts.push({ id: entry.id, kind: entry.kind, expected: true, activated, evidence })
             } else {
               let activated = false
@@ -63,14 +75,7 @@ export function apply(ctx, config) {
           // An active trial candidate is part of THIS instance's expected set.
           const trial = parsed.activeTrial
           if (trial && trial.status === 'active') {
-            let activated = false
-            let evidence = 'activation-unknown'
-            try {
-              const pm = ctx.get('pluginManager')
-              const found = pm ? (pm.listPlugins?.() ?? []).find(p => p.id === trial.candidateId || p.name === trial.candidateId) : undefined
-              activated = Boolean(found && found.status !== 'failed')
-              evidence = found ? `pluginManager:${found.status ?? 'loaded'}` : 'not-listed'
-            } catch { evidence = 'pluginManager-unavailable' }
+            const { activated, evidence } = await pluginStatus(trial.candidateId)
             artifacts.push({ id: trial.candidateId, kind: 'plugin', expected: true, activated, evidence, trial: true })
           }
         }
@@ -79,8 +84,8 @@ export function apply(ctx, config) {
         console.error(`evolution-probe: health write failed: ${error.message}`)
       }
     }
-    writeHealth()
-    const timer = setInterval(writeHealth, 5000)
+    void writeHealth()
+    const timer = setInterval(() => { void writeHealth() }, 5000)
     ctx.on('dispose', () => clearInterval(timer))
   }
 
