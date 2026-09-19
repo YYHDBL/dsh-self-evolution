@@ -1,0 +1,14 @@
+{
+  "name": "@self-evolving/evolution",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./control": "./src/control.ts",
+    "./costs": "./src/costs.ts",
+    "./budgets": "./src/budgets.ts",
+    "./lock": "./src/lock.ts",
+    "./undo": "./src/undo.ts"
+  }
+}

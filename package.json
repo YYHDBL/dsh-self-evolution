@@ -3,7 +3,7 @@
   "private": true,
   "packageManager": "pnpm@11.19.0",
   "scripts": {
-    "test": "vitest run packages/evolution-probe/tests"
+    "test": "vitest run packages"
   },
   "devDependencies": {
     "vitest": "link:vendor/dsh-0.1.6/node_modules/vitest"
