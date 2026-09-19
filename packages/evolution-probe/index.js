@@ -38,7 +38,8 @@ export function apply(ctx, config) {
         const artifacts = [{ id: 'evolution-probe', kind: 'plugin', expected: true, activated: true, evidence: 'self-active' }]
         const control = join(stateDir, 'control.json')
         if (existsSync(control)) {
-          for (const entry of JSON.parse(readFileSync(control, 'utf8')).baseline?.entries ?? []) {
+          const parsed = JSON.parse(readFileSync(control, 'utf8'))
+          for (const entry of parsed.baseline?.entries ?? []) {
             if (entry.kind === 'plugin') {
               let activated = false
               let evidence = 'activation-unknown'
@@ -58,6 +59,19 @@ export function apply(ctx, config) {
               } catch { /* missing */ }
               artifacts.push({ id: entry.id, kind: entry.kind, expected: true, activated, evidence })
             }
+          }
+          // An active trial candidate is part of THIS instance's expected set.
+          const trial = parsed.activeTrial
+          if (trial && trial.status === 'active') {
+            let activated = false
+            let evidence = 'activation-unknown'
+            try {
+              const pm = ctx.get('pluginManager')
+              const found = pm ? (pm.listPlugins?.() ?? []).find(p => p.id === trial.candidateId || p.name === trial.candidateId) : undefined
+              activated = Boolean(found && found.status !== 'failed')
+              evidence = found ? `pluginManager:${found.status ?? 'loaded'}` : 'not-listed'
+            } catch { evidence = 'pluginManager-unavailable' }
+            artifacts.push({ id: trial.candidateId, kind: 'plugin', expected: true, activated, evidence, trial: true })
           }
         }
         writeFileSync(healthPath, JSON.stringify({ bootId, atUtc: new Date().toISOString(), artifacts }))
