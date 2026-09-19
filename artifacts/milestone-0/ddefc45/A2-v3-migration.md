@@ -1,31 +1,31 @@
 # A2/V3 (+P1) — read-only migration of old-format logs @ ddefc45
 
-Date: 2026-09-19. Script: `scripts/probe/v3-migration.mjs`. Material: authorized copies of the two August sessions (old baseline `47f9438` format) under `state/runtime/migration-check/` (project/session hierarchy preserved). Result: **PASS**.
+Date: 2026-09-19 (revised same day after review). Script: `scripts/probe/v3-migration.mjs` (run with the vendored tsx: `./vendor/dsh-0.1.6/node_modules/.bin/tsx …`, because the old-side reference decodes through the backend's own TS frame decoder). Material: authorized copies of the two August sessions (old-baseline `47f9438` **V0 format**) under `state/runtime/migration-check/` (project/session hierarchy preserved).
 
-## P1 conclusions (interface facts for task C1)
+## Review fix (2026-09-19 evening)
 
-- The official backend boots standalone in a bare Cordis `Context`: `ctx.plugin(JsonlSessionPersistence, { root })` (default export of `@deepseek-ai/dsh-session-persistence-jsonl`; `Config.root` required, no default), service accessor `ctx.sessionPersistence` available after load.
-- **Root layout**: `<root>/<project-dir>/<session-dir>/…`. A flat copy (session dirs directly under root) is rejected with an explicit error ("unsupported flat-file layout; use a separate root or move it into a project/session directory") — first-run error kept as evidence. Therefore `EVO_SESSIONS_ROOT` must point at the sessions root that contains project directories (e.g. `$DSH_HOME/sessions`).
-- `list()` returns storage metadata; the session id lives at `meta.header.id` (pass that string to `open`). `open(id, 'read')` → `handle.read()` (no args = all events) → `close()`.
+The first version judged PASS purely by "source tree unchanged" and passed vacuously on an empty directory. The rewrite reports **two separate verdicts** and fails empty inputs:
 
-## V3 migration evidence
+- **MIGRATION** — asserts listed sessions ≥ `--expect-old N` (default 1); per session: raw header version < 3 (actually old format), migrated `header.version === 3`, and `turn/end` events correspond one-to-one old↔new. Empty/short input → FAIL, exit 1.
+- **READONLY** — full-tree sha256 before/after identical.
+- Old-side references are decoded with the backend's own concatenated-frame zstd decoder (`scanZstdFrames`/`decompressZstdFrame` from `packages/session/session-persistence-jsonl/src/zstd.ts`) — the flat legacy file is a 15-frame zstd container that Node's single-frame `zstdDecompressSync` cannot read whole; no self-parsed format.
 
-Both old-format sessions open read-only and present the **V3 in-memory view**:
+## Results — PASS (both verdicts)
 
 ```text
-listed sessions: 2
-- session-41e35adb-…: events=40 seq=[0..39] system/message=true
-- session-59135bb7-…: events=32 seq=[0..31] system/message=true
+- session-41e35adb-…: old v0 49 events seq[0..57] turn/end=[17,41,56]
+                     new v3 40 events seq[0..39] turn/end=[19,28,38]   (3↔3, mapped)
+- session-59135bb7-…: old v0 83 events seq[0..726] turn/end=[725]
+                     new v3 32 events seq[0..31] turn/end=[30]          (1↔1, mapped)
+READONLY  : PASS (2 files hashed, before==after: true)
+MIGRATION : PASS (listed 2 >= expected 2)
+OVERALL   : PASS  (exit 0)
+Empty-directory control run: MIGRATION FAIL, OVERALL FAIL, exit 1  (vacuous pass eliminated)
 ```
 
-- `header.version = 3` on the migrated view; `system/message` events are present — the V2→V3 migration (system-prompt insertion, seq renumbering) ran in memory, exactly the upstream-documented behavior.
-- Renumbered seq ranges recorded; old raw seq from the August evidence (e.g. turn/end at seq 56 in the old view) does not map 1:1 to the migrated view — concrete support for the `(sessionId, generation, seq)` dedupe key.
+Key old↔new reference material (seq/time only, no message content) is committed at [A2-v3-mapping.json](./A2-v3-mapping.json). The mapping is direct quantitative evidence that migration renumbers seq (event consolidation: 49→40, 83→32; turn/end 725→30, 56→38) — old `sessionId+seq` cannot be reused across generations, supporting the `(sessionId, generation, seq)` dedupe key in the plan.
 
-## Read-only proof
+## P1 conclusions (interface facts for task C1) — unchanged
 
-- `sha256` of both source files hashed before and after the full read pass: identical (`source files unchanged: true`, 2 files).
-- No write handle was opened; script only calls `open(id, 'read')`.
-
-## Reuse
-
-The failed-turn stub sessions from A2/P6 also created real V3 logs under the isolated `DSH_HOME` (workspace `ws-a`/`ws-b`) — reused by A3 for probe verification.
+- Backend boots standalone in a bare Cordis `Context`: `ctx.plugin(JsonlSessionPersistence, { root })` (default export; `Config.root` required, no default); accessor `ctx.sessionPersistence`; session id at `meta.header.id`; `open(id,'read')` → `handle.read()` → `close()`.
+- Root layout `<root>/<project-dir>/<session-dir>/…`; flat session-dir copies are rejected with an explicit error (kept as first-run evidence). `EVO_SESSIONS_ROOT` must point at the sessions root containing project directories.

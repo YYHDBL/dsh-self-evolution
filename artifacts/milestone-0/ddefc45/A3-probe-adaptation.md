@@ -12,9 +12,9 @@ Date: 2026-09-19. Result: **PASS on all credential-free acceptance items**; the 
    - root `package.json` vitest link now points at `vendor/dsh-0.1.6`
 2. Client registration API is unchanged from the old probe's shape (`ctx.slots.inject` + `ctx.slots.register`), confirmed against `ui-conversation/src/client/skeleton/TodoPanel.tsx:133-139` and `ui-renderer/src/client/registry.ts:209`.
 
-## Tests — PASS (3/3)
+## Tests — PASS (4/4)
 
-`npm test` → `Test Files 2 passed; Tests 3 passed`. Tests exercise the **shipped artifacts** (not sources): host append-exactly-one-record; a failing probe (relative config path) rejects without taking down the session context; client factory registers, renders the expected element, and unregisters on dispose.
+`npm test` → `Test Files 2 passed; Tests 4 passed`. Tests exercise the **shipped artifacts** (not sources): host append-exactly-one-record; a failing probe (relative config path) rejects without taking down the session context; **record-write failure after a successful load is isolated** (review fix ③: target path made a directory → every append fails EISDIR → the observed turn still ends, later sessions and later turns keep working; the probe now also wraps the append in try/catch so a write failure is logged and contained by construction); client factory registers, renders the expected element, and unregisters on dispose.
 
 ## Real-session record + official handle read-back — PASS (no credentials needed)
 
@@ -39,8 +39,17 @@ Probe installed into `baseline-web`; verification through the real web UI in a b
 
 Note: `conversation.composer.dock` renders in the session view (scope=session), not on the "New Session" preview — checked and recorded. An operator mistake during this sequence (one boot without `DSH_HOME` exported) failed fast against the default home and touched nothing there — kept as a process lesson, not an environment change.
 
+## Web E2E — real task in the web UI, probe vs official log, marker across refresh (review fix ②) — PASS
+
+The headless sessions above prove "task completes" and the browser checks prove "marker renders" separately; this closes the loop in one chain. Setup: `baseline-web` (upload-off patch + probe), isolated `DSH_HOME` with `settings.yaml` pinned to `deepseek-official / deepseek-v4-flash / reasoningEffort: off`, key via the layered `.env`; budget `2026-09-19-a3-web-e2e` registered before the call (1 call / 80k tokens) and settled within limits.
+
+1. **Real task in the web UI** — typed the prompt into the composer and sent; the model replied exactly `WEB_E2E_OK` in the conversation view (browser DOM).
+2. **Probe record vs official log** — probe appended `{"sessionId":"session-0f0fb75a-…","event":"turn/end","seq":19,…}`; official read-only handle on the same session: 20 events, seq `[0..19]`, exactly one `turn/end` at **seq 19**, assistant text `WEB_E2E_OK`, usage input 11714 / output 5 (booked in `evolution-private/costs.jsonl`, `usageSource: provider`). Preset recorded honestly as `standard` (default of the fresh isolated home).
+3. **Marker across refresh** — with the session view open, `reload()`: the app restored the session view and the marker `自进化：记录中` was again present and visible (count=1, visible=true), alongside the reply. (On a cold reload the landing view is the preview page where the session-scoped dock does not render; entering the session view shows it — consistent with `composer.dock` scope=session noted above.)
+
 ## Gaps / carried items
 
-- ~~Real web-UI PTC session with a successful model turn~~ **CLOSED 2026-09-19** (credentials provided): real successful turns on both `baseline-ptc` (no probe, `BASELINE_PTC_OK`) and `baseline-headless` (probe loaded, `A3_REAL_OK`); probe record and official handle agree (seq 17); usage booked. Details in `A2-build-boot.md`.
+- ~~Real web-UI task E2E~~ **CLOSED 2026-09-19 (review fix ②)** — see section above.
+- ~~Record-write failure isolation~~ **CLOSED 2026-09-19 (review fix ③)** — test + probe-side containment.
 - `dsh_plugin_packages` companion field observed in requests (A2) — flagged for owner decision on D-053 scope.
 - pnpm PATH: temporary shim used; a durable arrangement (global `corepack enable` or wrapper in scripts) to be decided at ✦B.

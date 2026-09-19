@@ -1,0 +1,97 @@
+{
+  "root": "/Users/yyhdbl/Desktop/自进化harness项目/state/runtime/migration-check",
+  "expectedOldSamples": 2,
+  "listedSessions": 2,
+  "sessions": [
+    {
+      "id": "session-41e35adb-4e63-4602-b315-36a8be87bdf3",
+      "old": {
+        "headerVersion": 0,
+        "events": 49,
+        "seqRange": [
+          0,
+          57
+        ],
+        "turnEndSeqs": [
+          17,
+          41,
+          56
+        ]
+      },
+      "new": {
+        "headerVersion": 3,
+        "events": 40,
+        "seqRange": [
+          0,
+          39
+        ],
+        "turnEndSeqs": [
+          19,
+          28,
+          38
+        ]
+      },
+      "turnEndMap": [
+        {
+          "oldSeq": 17,
+          "newSeq": 19,
+          "time": 1787242794660
+        },
+        {
+          "oldSeq": 41,
+          "newSeq": 28,
+          "time": 1787242960530
+        },
+        {
+          "oldSeq": 56,
+          "newSeq": 38,
+          "time": 1787243355785
+        }
+      ],
+      "checks": {
+        "rawIsOldFormat": true,
+        "migratedVersion3": true,
+        "turnEndCountsMatch": true,
+        "turnEndMapComplete": true
+      }
+    },
+    {
+      "id": "session-59135bb7-f7a1-4820-b122-111db1867651",
+      "old": {
+        "headerVersion": 0,
+        "events": 83,
+        "seqRange": [
+          0,
+          726
+        ],
+        "turnEndSeqs": [
+          725
+        ]
+      },
+      "new": {
+        "headerVersion": 3,
+        "events": 32,
+        "seqRange": [
+          0,
+          31
+        ],
+        "turnEndSeqs": [
+          30
+        ]
+      },
+      "turnEndMap": [
+        {
+          "oldSeq": 725,
+          "newSeq": 30,
+          "time": 1787243411987
+        }
+      ],
+      "checks": {
+        "rawIsOldFormat": true,
+        "migratedVersion3": true,
+        "turnEndCountsMatch": true,
+        "turnEndMapComplete": true
+      }
+    }
+  ]
+}

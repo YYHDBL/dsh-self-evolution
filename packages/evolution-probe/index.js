@@ -9,11 +9,16 @@ export function apply(ctx, config) {
   mkdirSync(dirname(config.path), { recursive: true })
   ctx.on('session/event', (session, event) => {
     if (event.type !== 'turn/end') return
-    appendFileSync(config.path, `${JSON.stringify({
-      sessionId: session.id,
-      event: event.type,
-      seq: event.seq,
-      time: event.time,
-    })}\n`)
+    // Record-write failures must never break the observed session (采集失败不影响正常任务).
+    try {
+      appendFileSync(config.path, `${JSON.stringify({
+        sessionId: session.id,
+        event: event.type,
+        seq: event.seq,
+        time: event.time,
+      })}\n`)
+    } catch (error) {
+      console.error(`evolution-probe: record write failed (session ${session.id}, seq ${event.seq}): ${error.code ?? error.message}`)
+    }
   })
 }
