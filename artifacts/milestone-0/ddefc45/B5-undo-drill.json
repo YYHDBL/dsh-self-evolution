@@ -1,0 +1,32 @@
+{
+ "drill": "B5 restricted file undo (throwaway workspace)",
+ "plan": {
+  "revert": 2,
+  "skipped": [
+   {
+    "file": "/var/folders/hc/6s4hypcx2nv37cv6dc80rk_c0000gn/T/b5-ws-3AQ9bw/readme.md",
+    "reason": "later-modified"
+   }
+  ],
+  "failed": []
+ },
+ "report": {
+  "reverted": [
+   "/var/folders/hc/6s4hypcx2nv37cv6dc80rk_c0000gn/T/b5-ws-3AQ9bw/config.yml (restored 65d27ce9…)",
+   "/var/folders/hc/6s4hypcx2nv37cv6dc80rk_c0000gn/T/b5-ws-3AQ9bw/plugin-state.json (deleted; kept /var/folders/hc/6s4hypcx2nv37cv6dc80rk_c0000gn/T/b5-ws-3AQ9bw/plugin-state.json.evo-undo-deleted)"
+  ],
+  "skipped": [
+   {
+    "file": "/var/folders/hc/6s4hypcx2nv37cv6dc80rk_c0000gn/T/b5-ws-3AQ9bw/readme.md",
+    "reason": "later-modified"
+   }
+  ],
+  "failed": []
+ },
+ "assertions": {
+  "untouchedRestored": true,
+  "userEditPreserved": true,
+  "createdRemoved": true,
+  "noFailures": true
+ }
+}
