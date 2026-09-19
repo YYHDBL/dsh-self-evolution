@@ -33,6 +33,12 @@ curl /?token=…    → 303   (redirect to app shell)
 process stopped after check
 ```
 
-## NOT done this round (honest gaps)
+## Minimal real PTC session — PASS (completed after credentials were provided)
 
-- **Minimal real PTC session with DeepSeek-V4-Flash: PENDING.** No `DEEPSEEK_API_KEY` is present on this machine (env empty; `~/.dsh` settings/storages contain no key; provider resolves keys via `apiKeyEnv`, default `DEEPSEEK_API_KEY` — `packages/llm/llm-deepseek/src/config.ts:13`). The stub-based request checks below are real request-level evidence for the upload-off requirement but are **not** a successful model session. Per instructions, no simulated result is recorded as passed acceptance.
+The user provided `DEEPSEEK_API_KEY` on 2026-09-19; it is configured through the official layered-env mechanism (`.env` in the project root and in the isolated `$DSH_HOME`, both gitignored, mode 600; `packages/boot/app-boot/src/index.ts:167-233` reads a project and a user `.env` layer). A budget was registered before the calls (`evolution-private/budgets/2026-09-19-a2-real-ptc.json`: callLimit 2, tokenLimit 80000) and settled after (2 calls, 21205 tokens total, within limits; costs booked in `evolution-private/costs.jsonl`).
+
+- **A2 item** — profile `baseline-ptc` (headless template + upload-off patch, no self-evolution plugin), fresh workspace, real endpoint (no `DEEPSEEK_BASE_URL` override): model replied exactly `BASELINE_PTC_OK`.
+  Session `session-db24a365-05a5-4110-a8f0-00c305b6c84d`, usage from the session log (`assistant/message.data.usage`): input 10583 / output 7 / cacheRead 0.
+- **A3 completion** — profile `baseline-headless` (upload off + probe loaded), real endpoint: model replied exactly `A3_REAL_OK`; the probe appended `{"sessionId":"session-f05343c0-…","event":"turn/end","seq":17,…}` and the official read-only handle shows the same session at 18 events, seq `[0..17]`, exactly one `turn/end` — record and handle agree on a successful real turn.
+
+Money is booked as `null` (no price version pinned yet; tokens recorded with `usageSource: provider`).

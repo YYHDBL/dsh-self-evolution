@@ -41,6 +41,6 @@ Note: `conversation.composer.dock` renders in the session view (scope=session), 
 
 ## Gaps / carried items
 
-- Real web-UI PTC session with a successful model turn: pending `DEEPSEEK_API_KEY` (same as A2). The record/handle verification above used a real boot whose turn failed at the local stub — honest, but not a successful model session.
+- ~~Real web-UI PTC session with a successful model turn~~ **CLOSED 2026-09-19** (credentials provided): real successful turns on both `baseline-ptc` (no probe, `BASELINE_PTC_OK`) and `baseline-headless` (probe loaded, `A3_REAL_OK`); probe record and official handle agree (seq 17); usage booked. Details in `A2-build-boot.md`.
 - `dsh_plugin_packages` companion field observed in requests (A2) — flagged for owner decision on D-053 scope.
 - pnpm PATH: temporary shim used; a durable arrangement (global `corepack enable` or wrapper in scripts) to be decided at ✦B.
