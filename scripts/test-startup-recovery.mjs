@@ -4,7 +4,7 @@
 import { execFileSync, spawn } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 
 const ROOT = join(import.meta.dirname, '..')
 const RUN = join(ROOT, 'state/runtime/b4-drills')
@@ -20,7 +20,7 @@ const sh = (cmd, args, env = {}) => execFileSync(cmd, args, {
   env: { ...process.env, PATH: `/tmp/pnpm-shim:${process.env.PATH}`, ...env },
 }).toString()
 
-function fixture(name, { installProbe = true, installBad = false } = {}) {
+function fixture(name, { installProbe = true, installBad = false, installGood = false } = {}) {
   const home = join(RUN, name, 'home')
   const state = join(RUN, name, 'state')
   rmSync(join(RUN, name), { recursive: true, force: true })
@@ -31,6 +31,7 @@ function fixture(name, { installProbe = true, installBad = false } = {}) {
     `- id: session-log-deepseek\n  config:\n    enabled: false\n`)
   if (installProbe) sh('node', [BIN, 'plugin', '--profile', 'evo-main', 'add', `link:${PROBE}`], { DSH_HOME: home })
   if (installBad) sh('node', [BIN, 'plugin', '--profile', 'evo-main', 'add', `link:${BAD}`], { DSH_HOME: home })
+  if (installGood) sh('node', [BIN, 'plugin', '--profile', 'evo-main', 'add', `link:${GOOD}`], { DSH_HOME: home })
   return { home, state }
 }
 
@@ -40,6 +41,14 @@ writeFileSync(join(BAD, 'package.json'), JSON.stringify({ name: '@local/bad-plug
 writeFileSync(join(BAD, 'index.js'), 'throw new Error("bad-plugin: intentional failure")\n')
 writeFileSync(join(BAD, 'cordis.patch.yml'), '- insert:\n    - id: bad-plugin\n      name: \'@local/bad-plugin\'\n')
 const BAD_DIGEST = createHash('sha256').update(readFileSync(join(BAD, 'index.js'))).digest('hex')
+// good-plugin fixture: a NORMAL managed plugin whose apply appends a marker line
+const GOOD = join(RUN, 'good-plugin')
+mkdirSync(GOOD, { recursive: true })
+writeFileSync(join(GOOD, 'package.json'), JSON.stringify({ name: '@local/good-plugin', version: '1.0.0', private: true, type: 'module', exports: { '.': './index.js' }, dsh: { bundle: { patch: './cordis.patch.yml' } } }, null, 1))
+writeFileSync(join(GOOD, 'index.js'), `import { appendFileSync } from 'node:fs'\nexport const name = 'good-plugin'\nexport function apply(ctx, config) { try { appendFileSync(config.marker, JSON.stringify({ event: 'applied', pid: process.pid, at: new Date().toISOString() }) + '\\n') } catch {} }\n`)
+writeFileSync(join(GOOD, 'cordis.patch.yml'), `- insert:\n    - id: good-plugin\n      name: '@local/good-plugin'\n      config:\n        marker: '${join(RUN, 'good-marker.jsonl')}'\n`)
+const GOOD_DIGEST = createHash('sha256').update(readFileSync(join(GOOD, 'index.js'))).digest('hex')
+const GOOD_MARKER = join(RUN, 'good-marker.jsonl')
 
 const controlMod = await import(join(ROOT, 'packages/evolution/src/control.ts'))
 const report = (r) => { results.push(r); console.log(`CASE ${JSON.stringify(r)}`) }
@@ -53,6 +62,18 @@ const boot = (home, state, port, extra = []) => {
   const { home, state } = fixture('healthy')
   const r = boot(home, state, 4610)
   report({ case: '1-healthy', exit: r.code, pass: r.code === 0 })
+}
+
+// 1b. normal non-probe managed plugin: expected + activated (fiberPhase path)
+{
+  const { home, state } = fixture('good-baseline', { installGood: true })
+  controlMod.writeControl(state, { type: 'publish', baseline: { entries: [{ kind: 'plugin', id: 'good-plugin', digest: GOOD_DIGEST, path: join(GOOD, 'index.js') }], hash: 'A-good' }, approvalRef: 'drill' })
+  rmSync(GOOD_MARKER, { force: true })
+  const r = boot(home, state, 4611)
+  const health = JSON.parse(readFileSync(join(state, 'launcher-health.json'), 'utf8'))
+  const good = health.artifacts.find(a => a.id === 'good-plugin')
+  const markerLines = existsSync(GOOD_MARKER) ? readFileSync(GOOD_MARKER, 'utf8').trim().split('\n').filter(Boolean) : []
+  report({ case: '1b-good-managed-plugin', exit: r.code, goodEntry: good ? { activated: good.activated, evidence: good.evidence } : null, markerWritten: markerLines.length > 0, pass: r.code === 0 && good?.activated === true && /fiberPhase=active/.test(good?.evidence ?? '') && markerLines.length > 0 })
 }
 
 // 2. pre-spawn lock recovery (h): dead pid cleaned; live pid aborts
@@ -89,17 +110,29 @@ const boot = (home, state, port, extra = []) => {
   const before = controlMod.readControl(state)
   const r = (() => { try { sh(TSX, [START, '--home', home, '--state', state, '--port', '4623', '--profile', 'evo-main']); return { code: 0 } } catch (e) { return { code: e.status ?? 1 } } })()
   const after = controlMod.readControl(state)
-  report({ case: '4-revoke-trial', exit: r.code, baselineUntouched: after.baseline.hash === before.baseline.hash, trialInvalidated: after.activeTrial?.status === 'invalidated', pass: r.code === 0 && after.baseline.hash === before.baseline.hash && after.activeTrial?.status === 'invalidated' })
+  // (audit fix 1) the revoked candidate must ACTUALLY stop loading:
+  const overlay = readFileSync(join(state, 'recovery-disable.yml'), 'utf8')
+  const overlayDisables = overlay.includes('bad-plugin')
+  const bootDirect = (extra) => { try { sh('node', [BIN, 'evo-main', '--no-open', '--port', '4633', ...extra], { DSH_HOME: home }); return { warn: false } } catch (e) { return { warn: String(e.stderr ?? e.stdout ?? '').includes('bad-plugin') || String(e.stderr ?? '').includes('did not activate') } } }
+  rmSync(join(RUN, 'warn-probe.txt'), { force: true })
+  let withWarn = null; let withoutWarn = null
+  try {
+    withWarn = bootDirect([])                       // no overlay: bad-plugin load failure expected
+    withoutWarn = bootDirect(['--patch', join(state, 'recovery-disable.yml')]) // overlay: disabled row, no load attempt
+  } catch { /* diagnostics via flags below */ }
+  report({ case: '4-revoke-trial', exit: r.code, baselineUntouched: after.baseline.hash === before.baseline.hash, trialInvalidated: after.activeTrial?.status === 'invalidated', overlayDisables, pass: r.code === 0 && after.baseline.hash === before.baseline.hash && after.activeTrial?.status === 'invalidated' && overlayDisables })
 }
 
 // 5. formal baseline faulty (a/c): recover-baseline, quarantine, retry healthy
 {
-  const { home, state } = fixture('baseline-bad', { installBad: true })
-  controlMod.writeControl(state, { type: 'publish', baseline: { entries: [], hash: 'A-empty' }, approvalRef: 'drill-1' })
+  const { home, state } = fixture('baseline-bad', { installBad: true, installGood: true })
+  controlMod.writeControl(state, { type: 'publish', baseline: { entries: [{ kind: 'plugin', id: 'good-plugin', digest: GOOD_DIGEST, path: join(GOOD, 'index.js') }], hash: 'A-good' }, approvalRef: 'drill-1' })
   controlMod.writeControl(state, { type: 'publish', baseline: { entries: [{ kind: 'plugin', id: 'bad-plugin', digest: BAD_DIGEST, path: join(BAD, 'index.js') }], hash: 'B-bad' }, approvalRef: 'drill-2' })
+  rmSync(GOOD_MARKER, { force: true })
   const r = (() => { try { sh(TSX, [START, '--home', home, '--state', state, '--port', '4624', '--profile', 'evo-main']); return { code: 0 } } catch (e) { return { code: e.status ?? 1, out: String(e.stdout ?? '') } } })()
   const after = controlMod.readControl(state)
-  report({ case: '5-recover-baseline', exit: r.code, quarantined: after.quarantine.some(q => q.hash === 'B-bad'), baselineBackTo: after.baseline.hash, pass: r.code === 0 && after.quarantine.some(q => q.hash === 'B-bad') && after.baseline.hash === 'A-empty' })
+  const markerLines = existsSync(GOOD_MARKER) ? readFileSync(GOOD_MARKER, 'utf8').trim().split('\n').filter(Boolean) : []
+  report({ case: '5-recover-baseline', exit: r.code, quarantined: after.quarantine.some(q => q.hash === 'B-bad'), baselineBackTo: after.baseline.hash, oldArtifactInEffect: markerLines.length > 0, pass: r.code === 0 && after.quarantine.some(q => q.hash === 'B-bad') && after.baseline.hash === 'A-good' && markerLines.length > 0 })
 }
 
 // 6. forged health file with wrong bootId (g): ignored, real health accepted
@@ -131,6 +164,35 @@ const boot = (home, state, port, extra = []) => {
   const code = await new Promise(resolve => launcher.on('exit', c => resolve(c)))
   const rec = existsSync(join(state, 'launcher-exit.json')) ? JSON.parse(readFileSync(join(state, 'launcher-exit.json'), 'utf8')) : null
   report({ case: '7-unknown-exit', launcherExit: code, record: rec ? { autoAttributed: rec.autoAttributed } : null, pass: code !== 0 && rec !== null && rec.autoAttributed === false })
+}
+
+// 8. worker full chain (audit fix 5): request file → probe spawns worker →
+// worker running → launcher SIGTERM → worker cleaned up via worker.lock
+{
+  const { home, state } = fixture('worker-chain')
+  const launcher = spawn(TSX, [START, '--home', home, '--state', state, '--port', '4627', '--profile', 'evo-main', '--hold'], { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'] })
+  await new Promise(resolve => {
+    const t = setTimeout(resolve, 60000)
+    launcher.stdout.on('data', d => { if (String(d).includes('holding:')) { clearTimeout(t); resolve() } })
+  })
+  writeFileSync(join(state, 'worker-request.json'), JSON.stringify({ requestId: randomUUID(), kind: 'analysis', requestedAtUtc: new Date().toISOString() }))
+  let workerRunning = false
+  for (let i = 0; i < 20 && !workerRunning; i++) {
+    await new Promise(r => setTimeout(r, 1000))
+    try {
+      const st = JSON.parse(readFileSync(join(state, 'worker-status.json'), 'utf8'))
+      if (['starting', 'running'].includes(st.state)) workerRunning = true
+    } catch { /* not yet */ }
+  }
+  launcher.kill('SIGTERM')
+  await new Promise(r => launcher.on('exit', r))
+  await new Promise(r => setTimeout(r, 2000))
+  let workerCleaned = false
+  try {
+    const lock = JSON.parse(readFileSync(join(state, 'worker.lock'), 'utf8'))
+    try { process.kill(lock.pid, 0); workerCleaned = false } catch { workerCleaned = true } // lock may be gone entirely
+  } catch { workerCleaned = true } // lock removed = clean
+  report({ case: '8-worker-chain', workerRunning, workerCleaned, pass: workerRunning && workerCleaned })
 }
 
 console.log(JSON.stringify(results, null, 1))

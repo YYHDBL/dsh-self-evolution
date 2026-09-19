@@ -33,15 +33,17 @@ export function apply(ctx, config) {
   // control file; memory/skill/config artifacts compare on-disk sha256 vs digest.
   if (stateDir && bootId) {
     const healthPath = join(stateDir, 'launcher-health.json')
+    // Upstream PluginInfo: { entryId, moduleName, enabled, fiberPhase:
+    // 'pending'|'loading'|'active'|'failed'|'unloading'|null } — no id/name/status fields.
     const pluginStatus = async (id) => {
       try {
         const pm = ctx.get('pluginManager')
         if (!pm?.listPlugins) return { activated: false, evidence: 'pluginManager-unavailable' }
-        const plugins = await pm.listPlugins() // async: awaiting is the point
-        const found = plugins.find(p => p.id === id || p.name === id)
-        return found
-          ? { activated: found.status !== 'failed', evidence: `pluginManager:${found.status ?? 'loaded'}` }
-          : { activated: false, evidence: 'not-listed' }
+        const plugins = await pm.listPlugins()
+        const found = plugins.find(p => p.entryId === id || p.moduleName === id || p.moduleName?.endsWith(`/${id}`) || p.moduleName?.startsWith(`${id}/`))
+        if (!found) return { activated: false, evidence: 'not-listed' }
+        const activated = found.enabled === true && found.fiberPhase === 'active'
+        return { activated, evidence: `pluginManager:enabled=${found.enabled},fiberPhase=${String(found.fiberPhase)}` }
       } catch { return { activated: false, evidence: 'pluginManager-unavailable' } }
     }
     const writeHealth = async () => {
@@ -94,17 +96,26 @@ export function apply(ctx, config) {
   if (stateDir) {
     const requestPath = join(stateDir, 'worker-request.json')
     let spawning = false
+    let lastRequestId = null
     const tick = async () => {
-      if (spawning || !existsSync(requestPath)) return
+      if (spawning) return
+      let request
+      try { request = JSON.parse(readFileSync(requestPath, 'utf8')) } catch { return } // absent/torn: nothing to do
+      if (!request?.requestId || request.requestId === lastRequestId) return // only NEW requests; the WORKER consumes the file
       spawning = true
+      lastRequestId = request.requestId
       try {
-        const worker = join(dirname(dirname(fileURLToPath(import.meta.url))), 'scripts', 'evolution-worker.mjs')
-        if (!existsSync(worker)) return
-        rmSync(requestPath)
+        // packages/evolution-probe/index.js → three dirnames reach the project root
+        const root = dirname(dirname(dirname(fileURLToPath(import.meta.url))))
+        const worker = join(root, 'scripts', 'evolution-worker.mjs')
+        if (!existsSync(worker)) {
+          console.error(`evolution-probe: worker script missing at ${worker} — request ${request.requestId} NOT served`)
+          return
+        }
         const child = spawn(process.execPath, [worker, 'run', '--state-dir', stateDir], { stdio: 'ignore' })
         child.unref()
         const lockPath = join(stateDir, 'worker.lock')
-        try { writeFileSync(lockPath + '.spawn', JSON.stringify({ pid: child.pid, spawnedBy: 'evolution-probe', atUtc: new Date().toISOString() })) } catch { /* informational */ }
+        try { writeFileSync(lockPath + '.spawn', JSON.stringify({ pid: child.pid, requestId: request.requestId, spawnedBy: 'evolution-probe', atUtc: new Date().toISOString() })) } catch { /* informational */ }
       } catch (error) {
         console.error(`evolution-probe: worker spawn failed: ${error.message}`)
       } finally { spawning = false }

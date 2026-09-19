@@ -179,31 +179,41 @@ export type BindResult =
 
 function conditionMatches(trial: Trial, ctx: BindInput['conditionCtx']): boolean {
   const c = trial.condition
+  // A defined condition requires the caller to actually provide that dimension;
+  // a missing ctx value is NOT an implicit pass.
   if (c.preset !== undefined && ctx.preset !== undefined && c.preset !== ctx.preset) return false
+  if (c.preset !== undefined && ctx.preset === undefined) return false
   if (c.workspacePrefix !== undefined && ctx.workspacePrefix !== undefined && !ctx.workspacePrefix.startsWith(c.workspacePrefix)) return false
+  if (c.workspacePrefix !== undefined && ctx.workspacePrefix === undefined) return false
   return true
 }
 
-/** The single binding entry point: check existing binding → effective trial →
- * deadline/quota → enroll, all inside one lock acquisition. */
+/** The single binding entry point: effectiveness FIRST (a revoked/digest-changed
+ * trial can never serve a candidate binding, even to an already-enrolled task),
+ * then existing-binding reuse, then deadline/quota/enroll — all inside one lock. */
 export function bindForTask(stateDir: string, input: BindInput): BindResult {
   mkdirSync(stateDir, { recursive: true })
   const lock = acquireLock(stateDir, 'control')
   try {
     const c = readControl(stateDir)
     const trial = c.activeTrial
-    // 1. Existing binding for this task wins: reuse the version, no new slot.
-    if (trial) {
-      const existing = trial.enrolled.find(e => e.taskId === input.taskId)
-      if (existing) return { bound: 'candidate', trialId: trial.trialId, reused: true }
+    if (!trial) return { bound: 'baseline', reused: false, reason: 'no-trial' }
+
+    // Effectiveness gate before any reuse (5.4 invariant):
+    const seqOk = trial.releaseSeq === c.seq
+    const digestOk = input.candidateDigestOnDisk !== null && input.candidateDigestOnDisk === trial.candidateDigest
+    if (trial.status === 'invalidated' || !seqOk || !digestOk) {
+      return { bound: 'baseline', reused: false, reason: !seqOk || trial.status === 'invalidated' ? 'trial-invalid' : 'digest-mismatch' }
     }
-    // 2. Effective-trial validation (5.4 invariant).
-    if (!trial || trial.status !== 'active' || trial.releaseSeq !== c.seq) {
-      return { bound: 'baseline', reused: false, reason: trial ? 'trial-invalid' : 'no-trial' }
+    if (trial.status === 'expired') {
+      // Normal expiry: already-enrolled tasks keep their bound version; new tasks fall back.
+      if (trial.enrolled.some(e => e.taskId === input.taskId)) return { bound: 'candidate', trialId: trial.trialId, reused: true }
+      return { bound: 'baseline', reused: false, reason: 'expired' }
     }
-    if (input.candidateDigestOnDisk === null || input.candidateDigestOnDisk !== trial.candidateDigest) {
-      return { bound: 'baseline', reused: false, reason: 'digest-mismatch' }
-    }
+
+    // Effective active trial → existing binding reuse (same task never re-books a slot).
+    if (trial.enrolled.some(e => e.taskId === input.taskId)) return { bound: 'candidate', trialId: trial.trialId, reused: true }
+
     if (Date.now() >= Date.parse(trial.deadlineUtc)) {
       trial.status = 'expired'
       writeAtomic(join(stateDir, 'control.json'), `${JSON.stringify(c, null, 2)}\n`)
@@ -215,7 +225,7 @@ export function bindForTask(stateDir: string, input: BindInput): BindResult {
     if (trial.enrolled.length >= MAX_ENROLLED) {
       return { bound: 'baseline', reused: false, reason: 'quota-full' }
     }
-    // 3. Reservation and binding are the SAME atomic write (no in-between).
+    // Reservation and binding are the SAME atomic write (no in-between).
     trial.enrolled.push({
       taskId: input.taskId,
       sessionId: input.sessionId,

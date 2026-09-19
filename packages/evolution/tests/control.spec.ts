@@ -104,10 +104,52 @@ describe('bindForTask', () => {
     const d2 = dir(); openTrial(d2, new Date(Date.now() - 1000).toISOString())
     expect(bind(d2, 't-y')).toMatchObject({ bound: 'baseline', reason: 'expired' })
     expect(readControl(d2).activeTrial!.status).toBe('expired')
-    expect(bind(d2, 't-z')).toMatchObject({ bound: 'baseline', reason: 'trial-invalid' })
+    expect(bind(d2, 't-z')).toMatchObject({ bound: 'baseline', reason: 'expired' })
   })
 
-  it('20 concurrent binds with quota 5: exactly 5 candidates, no over-enrollment', async () => {
+  it('a REVOKED or digest-changed trial never serves a candidate binding, even to an already-enrolled task', () => {
+    const d = dir(); openTrial(d)
+    expect(bind(d, 'task1')).toMatchObject({ bound: 'candidate' })
+    // revoked after enrollment
+    writeControl(d, { type: 'revoke-trial', reason: 'candidate crashed' })
+    expect(bind(d, 'task1')).toMatchObject({ bound: 'baseline', reason: 'trial-invalid' })
+    expect(bind(d, 'task2')).toMatchObject({ bound: 'baseline', reason: 'trial-invalid' })
+    // fresh trial, digest changed on disk after enrollment
+    const d2 = dir(); openTrial(d2)
+    expect(bind(d2, 'task1')).toMatchObject({ bound: 'candidate' })
+    expect(bind(d2, 'task1', 'tampered-digest')).toMatchObject({ bound: 'baseline', reason: 'digest-mismatch' })
+    expect(bind(d2, 'task1')).toMatchObject({ bound: 'candidate', reused: true }) // digest ok again → reuse
+  })
+
+  it('normal expiry lets an enrolled task continue, but blocks new tasks', () => {
+    const d = dir(); openTrial(d)
+    expect(bind(d, 'task1')).toMatchObject({ bound: 'candidate' })
+    const d2 = dir(); openTrial(d2, new Date(Date.now() - 1000).toISOString())
+    // expire it first via a new-task bind (writes status=expired)
+    expect(bind(d2, 't-new')).toMatchObject({ bound: 'baseline', reason: 'expired' })
+    // enrolled task on the SAME expired trial keeps its bound version
+    const c2 = readControl(d2)
+    c2.activeTrial!.enrolled.push({ taskId: 'old-task', sessionId: 's', boundVersion: 'candidate', enrolledAtUtc: new Date().toISOString() })
+    writeFileSync(join(d2, 'control.json'), JSON.stringify(c2))
+    expect(bind(d2, 'old-task')).toMatchObject({ bound: 'candidate', reused: true })
+    expect(bind(d2, 'another-new')).toMatchObject({ bound: 'baseline', reason: 'expired' })
+  })
+
+  it('a defined condition does NOT default-satisfy when the caller omits the dimension', () => {
+    const d = dir()
+    writeControl(d, {
+      type: 'enable-trial',
+      trial: { trialId: 't1', candidateId: 'c1', releaseSeq: 0, candidateDigest: 'dg', condition: { preset: 'ptc' }, startedAtUtc: new Date().toISOString(), deadlineUtc: new Date(Date.now() + 3600e3).toISOString() },
+    })
+    expect(bindForTask(d, { taskId: 'x', sessionId: 's', candidateDigestOnDisk: 'dg', conditionCtx: {} }))
+      .toMatchObject({ bound: 'baseline', reason: 'condition-mismatch' })
+    expect(bindForTask(d, { taskId: 'y', sessionId: 's', candidateDigestOnDisk: 'dg', conditionCtx: { preset: 'standard' } }))
+      .toMatchObject({ bound: 'baseline', reason: 'condition-mismatch' })
+    expect(bindForTask(d, { taskId: 'z', sessionId: 's', candidateDigestOnDisk: 'dg', conditionCtx: { preset: 'ptc' } }))
+      .toMatchObject({ bound: 'candidate' })
+  })
+
+  it('same-process interleaved binds stay correct; cross-process mutual exclusion is the O_EXCL lock (see lock drills)', async () => {
     const d = dir(); openTrial(d)
     const results = await Promise.all(
       Array.from({ length: 20 }, (_, i) => Promise.resolve().then(() => bind(d, `conc${i}`))),
@@ -119,7 +161,7 @@ describe('bindForTask', () => {
     expect(readControl(d).activeTrial!.enrolled).toHaveLength(MAX_ENROLLED)
   })
 
-  it('crash between check and write cannot double-book: reservation IS the write (atomic file)', () => {
+  it('reuse-path binds perform no file write (the enroll write IS the binding; no crash injection claimed)', () => {
     const d = dir(); openTrial(d)
     bind(d, 'a')
     const before = readFileSync(join(d, 'control.json'), 'utf8')
@@ -137,7 +179,7 @@ describe('lock semantics', () => {
     expect(existsSync(join(d, 'control.lock'))).toBe(true)
   })
 
-  it('20 concurrent writers all serialize without losing updates', async () => {
+  it('same-process interleaved writers serialize without losing updates (cross-process mutual exclusion is O_EXCL, see lock drills)', async () => {
     const d = dir()
     await Promise.all(
       Array.from({ length: 20 }, (_, i) =>

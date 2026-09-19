@@ -68,6 +68,26 @@ describe('budgets reserve/settle', () => {
     expect(() => reserve(d, 'at1', 1)).toThrow(/stopped/)
   })
 
+  it('an OVERRUN is booked, not kept at the estimate; a breach stops the budget', () => {
+    const d = dir(); base(d, { tokenLimit: 500, callLimit: 5 })
+    const r = reserve(d, 'at1', 100)
+    settleReservation(d, r, { tokens: 900, calls: 1 })
+    const budget = JSON.parse(readFileSync(join(d, 'budgets/at1.json'), 'utf8'))
+    expect(budget.reservedTokens).toBe(900)   // 100 est + 800 overrun booked
+    expect(budget.status).toBe('stopped')     // 900 > 500 → hard gate closed
+    expect(budget.stopReason).toBe('budget_exhausted')
+    expect(() => reserve(d, 'at1', 1)).toThrow(/stopped/)
+  })
+
+  it('a overrun that stays within the limit is booked but does not stop the budget', () => {
+    const d = dir(); base(d, { tokenLimit: 2000, callLimit: 5 })
+    const r = reserve(d, 'at1', 100)
+    settleReservation(d, r, { tokens: 300, calls: 1 })
+    const budget = JSON.parse(readFileSync(join(d, 'budgets/at1.json'), 'utf8'))
+    expect(budget.reservedTokens).toBe(300)
+    expect(budget.status).toBe('open')
+  })
+
   it('call limit stops further reservations; settleBudget lists open reservations', () => {
     const d = dir(); base(d, { callLimit: 1, tokenLimit: 5000 })
     const r = reserve(d, 'at1', 100)

@@ -13,8 +13,13 @@ const server = createServer((req, res) => {
   req.on('end', () => {
     const body = Buffer.concat(chunks).toString('utf8')
     appendFileSync(out, JSON.stringify({ path: req.url, headers: req.headers, body }) + '\n')
-    res.writeHead(401, { 'content-type': 'application/json' })
-    res.end(JSON.stringify({ error: { message: 'p6 stub: intentional 401', code: 'stub_auth' } }))
+    const respond = () => {
+      res.writeHead(401, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ error: { message: 'p6 stub: intentional 401', code: 'stub_auth' } }))
+    }
+    const delay = Number(process.env.STUB_DELAY_MS ?? 0)
+    if (delay > 0) setTimeout(respond, delay)
+    else respond()
   })
 })
 server.listen(port, '127.0.0.1', () => {

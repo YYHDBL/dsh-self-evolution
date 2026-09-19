@@ -48,7 +48,7 @@ describe('restricted file undo', () => {
     expect(ids).toContain(created)
     expect(plan.skipped).toContainEqual({ file: userTouched, reason: 'later-modified' })
 
-    const report = applyUndo(priv, plan)
+    const report = applyUndo(priv, plan, { writersStopped: true })
     expect(readFileSync(owned, 'utf8')).toBe('original-content\n')   // restored
     expect(existsSync(created)).toBe(false)                          // deleted (backup kept)
     expect(readFileSync(userTouched, 'utf8')).toBe('user-edited-again\n') // untouched
@@ -81,11 +81,23 @@ describe('restricted file undo', () => {
     // simulate a late write between plan and apply
     const plan = planUndo(priv, SOURCE)
     writeFileSync(raced, 'late-write\n')
-    const report = applyUndo(priv, plan)
+    const report = applyUndo(priv, plan, { writersStopped: true })
     expect(report.skipped).toContainEqual({ file: gone, reason: 'missing-file' })
     expect(report.skipped).toContainEqual({ file: raced, reason: 'later-modified' })
     expect(report.reverted).toHaveLength(0)
     expect(readFileSync(raced, 'utf8')).toBe('late-write\n')
+  })
+
+  it('REFUSES to revert anything without the writers-stopped precondition (audit fix 7)', () => {
+    const priv = dir()
+    const ws = dir()
+    const f = join(ws, 'guarded.txt')
+    change(priv, f, 'before\n', 'after\n')
+    const plan = planUndo(priv, SOURCE)
+    const report = applyUndo(priv, plan) // no opts
+    expect(report.reverted).toHaveLength(0)
+    expect(report.skipped).toContainEqual({ file: f, reason: 'unclear-owner' })
+    expect(readFileSync(f, 'utf8')).toBe('after\n') // left for the human
   })
 
   it('never touches files owned by other sources (whole-workspace restore is out of scope)', () => {
@@ -96,7 +108,7 @@ describe('restricted file undo', () => {
     change(priv, mine, 'm0\n', 'm1\n')
     journalWrite(priv, { file: other, beforeHash: hashOf('o0\n'), beforeRef: 'undo/other-source/mat', afterHash: hashOf('o1\n'), source: 'other-source', ts: new Date().toISOString() }, Buffer.from('o0\n'))
     writeFileSync(other, 'o1\n')
-    const report = applyUndo(priv, planUndo(priv, SOURCE))
+    const report = applyUndo(priv, planUndo(priv, SOURCE), { writersStopped: true })
     expect(report.reverted).toHaveLength(1)
     expect(readFileSync(other, 'utf8')).toBe('o1\n') // other source's journal is not our business
   })

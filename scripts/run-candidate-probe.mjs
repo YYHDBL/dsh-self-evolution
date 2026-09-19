@@ -28,12 +28,25 @@ const PRIV = join(ROOT, 'evolution-private')
 const BIN = join(ROOT, 'vendor/dsh-0.1.6/apps/cli/lib/bin.js')
 const STUB_PORT = 4595
 
-const envAll = (over = {}) => ({
-  ...process.env,
-  DSH_HOME: HOME,
-  PATH: `/tmp/pnpm-shim:${process.env.PATH}`,
-  ...over,
-})
+function envAll(over = {}) {
+  // (audit fix 6) allowlist: no wholesale process.env inheritance; the ONLY
+  // credential picked from the project .env is DEEPSEEK_API_KEY, and only when
+  // the caller has not supplied its own key (stub runs pass a dummy).
+  const env = {
+    PATH: `/tmp/pnpm-shim:${process.env.PATH ?? ''}`,
+    HOME: process.env.HOME,
+    LANG: process.env.LANG ?? 'C.UTF-8',
+    DSH_HOME: HOME,
+  }
+  if (process.env.TZ) env.TZ = process.env.TZ
+  if (!over.DEEPSEEK_API_KEY) {
+    try {
+      const line = readFileSync(join(ROOT, '.env'), 'utf8').split('\n').find(l => l.startsWith('DEEPSEEK_API_KEY='))
+      if (line) env.DEEPSEEK_API_KEY = line.slice('DEEPSEEK_API_KEY='.length).trim()
+    } catch { /* no .env: stub runs pass their own key */ }
+  }
+  return { ...env, ...over }
+}
 
 function sh(cmd, args, opts = {}) {
   return execFileSync(cmd, args, { encoding: 'utf8', env: envAll(opts.env), cwd: opts.cwd ?? ROOT, stdio: ['ignore', 'pipe', 'pipe'] })
@@ -41,7 +54,11 @@ function sh(cmd, args, opts = {}) {
 
 function initHome() {
   mkdirSync(HOME, { recursive: true }); mkdirSync(WS, { recursive: true })
-  writeFileSync(join(HOME, '.env'), readFileSync(join(ROOT, '.env'), 'utf8')) // real key, layered env
+  // (audit fix 6) minimal env layer: only the model credential, nothing else
+  try {
+    const line = readFileSync(join(ROOT, '.env'), 'utf8').split('\n').find(l => l.startsWith('DEEPSEEK_API_KEY='))
+    if (line) writeFileSync(join(HOME, '.env'), `${line.trim()}\n`)
+  } catch { /* no project .env */ }
   writeFileSync(join(HOME, 'settings.yaml'), `agent-default-model:\n  provider: deepseek-official\n  model: deepseek-v4-flash\n  reasoningEffort: off\nagent-presets:\n  default: cordis\n  modeSelectionEnabled: true\n`)
   for (const [profile, template] of [['cordis-run', 'headless'], ['cand-test', 'headless']]) {
     const dir = join(HOME, 'profiles', profile)
@@ -136,17 +153,45 @@ if (cmd === 'create' || cmd === 'stop-drill') {
     console.log(`budget reserved (${r.reservationId}); launching REAL creator run…`)
     const opId = `op-${attemptId}`
     appendCost(PRIV, { kind: 'start', eventId: `evt-${attemptId}`, operationId: opId, stage: 'milestone-0-probe', attempt: attemptId, provider: 'deepseek-official', model: 'deepseek-v4-flash', startedAtUtc: new Date().toISOString(), budgetRef: attemptId, reservationId: r.reservationId })
-    const out = sh('node', [BIN, 'cordis-run', prompt], { cwd: WS })
+    const wallClock = 20 * 60e3
+    let out = ''
+    let timedOut = false
+    try {
+      out = execFileSync('node', [BIN, 'cordis-run', prompt], { encoding: 'utf8', cwd: WS, env: envAll(), timeout: wallClock, killSignal: 'SIGKILL' })
+    } catch (error) {
+      if (error.killed || /TIMED?OUT/i.test(String(error.message))) {
+        timedOut = true
+        appendCost(PRIV, { kind: 'finish', eventId: `evt-${attemptId}-f`, operationId: opId, status: 'cancelled', finishedAtUtc: new Date().toISOString(), durationMs: wallClock, usage: null, usageSource: 'unknown', money: null, failureReason: 'wall-clock timeout; child killed' })
+        const b = JSON.parse(readFileSync(join(PRIV, 'budgets', `${attemptId}.json`), 'utf8'))
+        b.status = 'stopped'; b.stopReason = 'timeout'; b.finishedAtUtc = new Date().toISOString()
+        writeFileSync(join(PRIV, 'budgets', `${attemptId}.json`), JSON.stringify(b, null, 2))
+        console.log(JSON.stringify({ timedOut: true, killed: true, budget: { status: b.status, stopReason: b.stopReason } }))
+        process.exit(0)
+      }
+      throw error
+    }
     console.log('creator reply tail:', out.split('\n').slice(-3).join(' / '))
     const id = await newestSession()
     const s = await readSession(id)
-    const usage = s?.events.filter(e => e.type === 'assistant/message').map(e => e.data?.usage).at(-1) ?? null
-    const total = usage ? (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0) : null
-    settleReservation(PRIV, r, { tokens: total, calls: 1 })
-    appendCost(PRIV, { kind: 'finish', eventId: `evt-${attemptId}-f`, operationId: opId, status: 'completed', finishedAtUtc: new Date().toISOString(), durationMs: null, usage: usage ? { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, cachedInputTokens: usage.cacheReadTokens ?? null, reasoningTokens: null } : null, usageSource: 'provider', money: null })
+    // (audit fix 4) SUM usage over ALL settled assistant messages (tool-loop
+    // rounds included); calls = messages + failed attempts (retries count).
+    const messages = s?.events.filter(e => e.type === 'assistant/message') ?? []
+    const attempts = s?.events.filter(e => e.type === 'assistant/attempt') ?? []
+    const sum = messages.reduce((acc, e) => {
+      const u = e.data?.usage
+      if (!u) return acc
+      acc.inputTokens += u.inputTokens ?? 0
+      acc.outputTokens += u.outputTokens ?? 0
+      acc.cachedInputTokens += u.cacheReadTokens ?? 0
+      acc.totalTokens += u.totalTokens ?? (u.inputTokens ?? 0) + (u.outputTokens ?? 0)
+      return acc
+    }, { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, totalTokens: 0 })
+    const calls = messages.length + attempts.length
+    settleReservation(PRIV, r, { tokens: sum.totalTokens || null, calls })
+    appendCost(PRIV, { kind: 'finish', eventId: `evt-${attemptId}-f`, operationId: opId, status: 'completed', finishedAtUtc: new Date().toISOString(), durationMs: null, usage: { inputTokens: sum.inputTokens, outputTokens: sum.outputTokens, cachedInputTokens: sum.cachedInputTokens, reasoningTokens: null }, usageSource: 'provider', money: null })
     const summary = settleBudget(PRIV, attemptId)
     const files = ['package.json', 'index.js', 'cordis.patch.yml'].map(f => existsSync(join(BUNDLE, f)))
-    console.log(JSON.stringify({ session: id, preset: s?.header.agentPreset, usage, bundleFiles: files, budget: summary }, null, 1))
+    console.log(JSON.stringify({ session: id, calls, usage: sum, bundleFiles: files, budget: summary }, null, 1))
   } catch (error) {
     console.log(`STOPPED BEFORE MODEL CALL: ${error.message}`)
     const summary = settleBudget(PRIV, attemptId)
@@ -185,5 +230,30 @@ if (cmd === 'verify') {
   process.exit(ok ? 0 : 1)
 }
 
-console.error('usage: tsx run-candidate-probe.mjs p3-smoke|create|verify|stop-drill')
+if (cmd === 'timeout-drill') {
+  // (audit fix 4 drill) REAL mid-run stop: the provider stub delays 30s; the
+  // creator run carries a 8s wall-clock budget → the child must be KILLED at
+  // ~8s, the budget stopped as timeout, and a cancelled cost booked. No real spend.
+  initHome()
+  const { openBudget, reserve } = await import(pathToFileURL(join(ROOT, 'packages/evolution/src/budgets.ts')).href)
+  const attemptId = '2026-09-19-b2-timeoutdrill'
+  openBudget(PRIV, { attemptId, stage: 'milestone-0-probe', wallClockLimitMs: 8000, callLimit: 2, tokenLimit: 50000, scope: 'timeout drill against slow stub (no real endpoint)', startedAtUtc: new Date().toISOString() })
+  const r = reserve(PRIV, attemptId, 10000)
+  const t0 = Date.now()
+  try {
+    execFileSync('node', [BIN, 'cordis-run', 'Reply with exactly: NEVER'], {
+      encoding: 'utf8', cwd: WS, timeout: 8000, killSignal: 'SIGKILL',
+      env: envAll({ DEEPSEEK_BASE_URL: `http://127.0.0.1:${STUB_PORT}`, DEEPSEEK_API_KEY: 'sk-stub' }),
+    })
+  } catch (error) {
+    const elapsed = Date.now() - t0
+    const killed = Boolean(error.killed) || /TIMED?OUT/i.test(String(error.message))
+    console.log(JSON.stringify({ drill: 'runtime-timeout-stop', elapsedMs: elapsed, killed, childTerminated: killed && elapsed < 15000 }))
+    process.exit(killed && elapsed < 15000 ? 0 : 1)
+  }
+  console.log('UNEXPECTED: slow-stub call returned without timeout')
+  process.exit(1)
+}
+
+console.error('usage: tsx run-candidate-probe.mjs p3-smoke|create|verify|stop-drill|timeout-drill')
 process.exit(2)

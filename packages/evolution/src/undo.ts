@@ -79,9 +79,20 @@ export function planUndo(dir: string, source: string): UndoPlan {
 
 export interface UndoReport { reverted: string[]; skipped: { file: string; reason: SkipReason }[]; failed: { file: string; error: string }[] }
 
-/** Execute a plan: re-verify current hash immediately before each restore (narrow the race window). */
-export function applyUndo(dir: string, plan: UndoPlan): UndoReport {
+/**
+ * Execute a plan: re-verify current hash immediately before each restore.
+ * PRECONDITION — writersStopped: the auditor-required scope restriction. File
+ * undo in phase 1 applies ONLY in isolated workspaces whose writers are
+ * confirmed stopped; without that confirmation every entry goes to the human.
+ * Hash re-checks narrow the window; they do NOT make concurrent writes safe,
+ * and no such safety is claimed.
+ */
+export function applyUndo(dir: string, plan: UndoPlan, opts: { writersStopped?: boolean } = {}): UndoReport {
   const report: UndoReport = { reverted: [], skipped: [...plan.skipped], failed: [...plan.failed] }
+  if (opts.writersStopped !== true) {
+    report.skipped.push(...plan.revert.map(e => ({ file: e.file, reason: 'unclear-owner' as SkipReason })))
+    return report
+  }
   for (const entry of plan.revert) {
     try {
       if (hashFile(entry.file) !== entry.afterHash) {

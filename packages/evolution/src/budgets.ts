@@ -76,14 +76,24 @@ export function reserve(dir: string, attemptId: string, estTokens: number): Rese
   return reservation
 }
 
-/** Known usage releases the excess reservation; unknown (null) keeps it. */
+/** Known usage releases the excess reservation; an OVERRUN is booked onto the
+ * reservation (never silently kept at the estimate), and a resulting breach of
+ * tokenLimit stops the budget — the hard gate then refuses any further call. */
 export function settleReservation(dir: string, r: Reservation, actual: { tokens: number | null; calls: number }): void {
   const b = load(dir, r.attemptId)
   b.openReservations = b.openReservations.filter(id => id !== r.reservationId)
   b.calls += actual.calls
   if (actual.tokens !== null) {
-    const excess = Math.max(0, r.estTokens - actual.tokens)
-    b.reservedTokens = Math.max(0, b.reservedTokens - excess)
+    if (actual.tokens > r.estTokens) {
+      b.reservedTokens += actual.tokens - r.estTokens // book the overrun
+      if (b.tokenLimit !== null && b.reservedTokens > b.tokenLimit) {
+        b.status = 'stopped'
+        b.stopReason = 'budget_exhausted'
+        b.note = `overrun: reservation ${r.reservationId} consumed ${actual.tokens} against estimate ${r.estTokens}; total ${b.reservedTokens} exceeds limit ${b.tokenLimit}`
+      }
+    } else {
+      b.reservedTokens = Math.max(0, b.reservedTokens - (r.estTokens - actual.tokens))
+    }
   }
   store(dir, b)
 }
