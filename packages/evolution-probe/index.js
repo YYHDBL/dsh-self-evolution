@@ -33,6 +33,7 @@ export function apply(ctx, config) {
   // control file; memory/skill/config artifacts compare on-disk sha256 vs digest.
   if (stateDir && bootId) {
     const healthPath = join(stateDir, 'launcher-health.json')
+    let healthDeferredCount = 0
     // Upstream PluginInfo: { entryId, moduleName, enabled, fiberPhase:
     // 'pending'|'loading'|'active'|'failed'|'unloading'|null } — no id/name/status fields.
     const pluginStatus = async (id) => {
@@ -80,6 +81,22 @@ export function apply(ctx, config) {
             const { activated, evidence } = await pluginStatus(trial.candidateId)
             artifacts.push({ id: trial.candidateId, kind: 'plugin', expected: true, activated, evidence, trial: true })
           }
+        }
+        // Readiness gate: a plugin-kind check that could not even reach
+        // pluginManager is a TRANSIENT (services still starting), not an
+        // activation failure. Publishing it would make the launcher wrongly
+        // quarantine healthy artifacts — so this round writes nothing and the
+        // next heartbeat retries. If the service never comes up, the
+        // launcher's health timeout (not a false verdict) is the honest result.
+        if (artifacts.some(a => a.evidence === 'pluginManager-unavailable')) {
+          healthDeferredCount += 1
+          if (healthDeferredCount <= 6) { // ~30s at 5s heartbeats: startup transients resolve well within this
+            console.error(`evolution-probe: health not ready (pluginManager unavailable, try ${healthDeferredCount}); deferring write`)
+            return
+          }
+          console.error('evolution-probe: pluginManager unavailable beyond transient window — publishing with unavailable evidence (real absence, not silence)')
+        } else {
+          healthDeferredCount = 0
         }
         writeFileSync(healthPath, JSON.stringify({ bootId, atUtc: new Date().toISOString(), artifacts }))
       } catch (error) {

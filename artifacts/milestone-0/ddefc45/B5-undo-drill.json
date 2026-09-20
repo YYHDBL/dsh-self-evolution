@@ -1,29 +1,24 @@
 {
- "drill": "B5 restricted file undo (throwaway workspace)",
- "plan": {
-  "revert": 2,
-  "skipped": [
-   {
-    "file": "/var/folders/hc/6s4hypcx2nv37cv6dc80rk_c0000gn/T/b5-ws-3AQ9bw/readme.md",
-    "reason": "later-modified"
-   }
-  ],
-  "failed": []
+ "drill": "B5 restricted file undo (throwaway workspace; writersStopped precondition)",
+ "phaseA_refusal": {
+  "reverted": 0,
+  "skippedToHuman": 3
  },
- "report": {
+ "phaseB": {
   "reverted": [
-   "/var/folders/hc/6s4hypcx2nv37cv6dc80rk_c0000gn/T/b5-ws-3AQ9bw/config.yml (restored 65d27ce9…)",
-   "/var/folders/hc/6s4hypcx2nv37cv6dc80rk_c0000gn/T/b5-ws-3AQ9bw/plugin-state.json (deleted; kept /var/folders/hc/6s4hypcx2nv37cv6dc80rk_c0000gn/T/b5-ws-3AQ9bw/plugin-state.json.evo-undo-deleted)"
+   "/var/folders/hc/6s4hypcx2nv37cv6dc80rk_c0000gn/T/b5-ws-JIUjSP/config.yml (restored 65d27ce9…)",
+   "/var/folders/hc/6s4hypcx2nv37cv6dc80rk_c0000gn/T/b5-ws-JIUjSP/plugin-state.json (deleted; kept /var/folders/hc/6s4hypcx2nv37cv6dc80rk_c0000gn/T/b5-ws-JIUjSP/plugin-state.json.evo-undo-deleted)"
   ],
   "skipped": [
    {
-    "file": "/var/folders/hc/6s4hypcx2nv37cv6dc80rk_c0000gn/T/b5-ws-3AQ9bw/readme.md",
+    "file": "/var/folders/hc/6s4hypcx2nv37cv6dc80rk_c0000gn/T/b5-ws-JIUjSP/readme.md",
     "reason": "later-modified"
    }
   ],
   "failed": []
  },
  "assertions": {
+  "refusalWithoutPrecondition": true,
   "untouchedRestored": true,
   "userEditPreserved": true,
   "createdRemoved": true,

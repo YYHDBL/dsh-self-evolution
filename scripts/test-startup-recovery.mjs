@@ -110,10 +110,25 @@ const boot = (home, state, port, extra = []) => {
   const before = controlMod.readControl(state)
   const r = (() => { try { sh(TSX, [START, '--home', home, '--state', state, '--port', '4623', '--profile', 'evo-main']); return { code: 0 } } catch (e) { return { code: e.status ?? 1 } } })()
   const after = controlMod.readControl(state)
-  // (audit fix 1) the revoked candidate must ACTUALLY stop loading:
-  const overlay = readFileSync(join(state, 'recovery-disable.yml'), 'utf8')
-  const overlayDisables = overlay.includes('bad-plugin')
-  const bootDirect = (extra) => { try { sh('node', [BIN, 'evo-main', '--no-open', '--port', '4633', ...extra], { DSH_HOME: home }); return { warn: false } } catch (e) { return { warn: String(e.stderr ?? e.stdout ?? '').includes('bad-plugin') || String(e.stderr ?? '').includes('did not activate') } } }
+  // (audit fix 1) the revoked candidate must ACTUALLY stop loading: disable
+  // rows now live in the profile's own patch layer (the --patch overlay path
+  // breaks pluginManager startup in this deployment — see pm-availability-check).
+  const profilePatch = readFileSync(join(home, 'profiles/evo-main/cordis.patch.yml'), 'utf8')
+  const overlayDisables = profilePatch.includes('- id: bad-plugin')
+  // Direct boots run the WEB SERVER, which never exits by itself: a bounded
+  // run (timeout + SIGKILL) is the only way; the load-warning verdict comes
+  // from captured stderr. Without this the drill hangs forever.
+  const bootDirect = (extra) => {
+    try {
+      execFileSync('node', [BIN, 'evo-main', '--no-open', '--port', '4633', ...extra], { DSH_HOME: home, timeout: 30000, killSignal: 'SIGKILL', encoding: 'utf8' })
+      return { warn: false }
+    } catch (e) {
+      const out = String(e.stderr ?? '') + String(e.stdout ?? '')
+      return { warn: out.includes('bad-plugin') || out.includes('did not activate') }
+    }
+  }
+  // NOTE: the with/without-overlay direct-boot contrast used --patch and is
+  // superseded by the profile-patch-layer disable + pm-availability-check triple.
   rmSync(join(RUN, 'warn-probe.txt'), { force: true })
   let withWarn = null; let withoutWarn = null
   try {

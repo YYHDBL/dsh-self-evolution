@@ -82,13 +82,28 @@ try {
 const expectedTrialCandidate = control.activeTrial?.status === 'active' ? control.activeTrial.candidateId : null
 log(`control: seq=${control.seq} baseline=${control.baseline.hash} entries=${control.baseline.entries.length} trial=${expectedTrialCandidate ?? 'none'}${emptySetMode ? ' [EMPTY-SET MODE]' : ''}`)
 
-// ── 3. Recovery enforcement overlay (official --patch mechanism) ───────────
+// ── 3. Recovery enforcement: disable rows live in the PROFILE's own patch
+// layer (same official mechanism as the upload-off rows), NOT via the `--patch`
+// flag — empirically (pm-availability-check) an overlay passed with --patch
+// prevents pluginManager from starting in this deployment, which would break
+// health verification of the recovered boot. The launcher owns this profile.
 const disableIds = new Set()
-const recoveryPatchPath = join(STATE, 'recovery-disable.yml')
+const profilePatchPath = join(HOME, 'profiles', PROFILE, 'cordis.patch.yml')
 function writeRecoveryPatch() {
-  const rows = [...disableIds].filter(Boolean).map(id => `- id: ${id}\n  disabled: true\n`).join('')
-  writeFileSync(recoveryPatchPath, rows)
-  log(`recovery overlay: ${[...disableIds].join(', ') || '(none)'}`)
+  let current = ''
+  try { current = readFileSync(profilePatchPath, 'utf8') } catch { /* none yet */ }
+  // strip any previously appended disable rows (idempotent rewrite), keep the rest
+  const keepLines = []
+  let skipNext = 0
+  for (const line of current.split('\n')) {
+    if (skipNext > 0) { skipNext -= 1; continue }
+    if (/^- id: .+\n?$/.test(line) && disableIds.has(line.replace('- id: ', '').trim())) { skipNext = 1; continue } // row + its disabled line
+    keepLines.push(line)
+  }
+  const rows = [...disableIds].filter(Boolean).map(id => `- id: ${id}\n  disabled: true`).join('\n')
+  const next = keepLines.join('\n').replace(/\n+$/, '') + (rows ? `\n${rows}\n` : '\n')
+  writeFileSync(profilePatchPath, next)
+  log(`recovery disable rows (profile patch layer): ${[...disableIds].join(', ') || '(none)'}`)
 }
 writeRecoveryPatch()
 
@@ -113,7 +128,6 @@ async function bootOnce(attempt) {
   const healthPath = join(STATE, 'launcher-health.json')
   // No pre-delete: stale or forged health files are ignored by the bootId match below.
   const args = [BIN, PROFILE, '--no-open', '--port', String(PORT)]
-  if (disableIds.size > 0) args.push('--patch', recoveryPatchPath)
   const child = spawn(process.execPath, args, { cwd: HOME, env: childEnv(bootId), stdio: ['ignore', 'pipe', 'pipe'] })
   const childLog = []
   child.stdout.on('data', d => childLog.push(String(d)))
@@ -134,11 +148,13 @@ async function bootOnce(attempt) {
   if (health === null) {
     const exit = await Promise.race([dead, new Promise(r => setTimeout(() => r(null), 1000))])
     child.kill('SIGKILL')
+    await Promise.race([dead, new Promise(r => setTimeout(() => r(null), 3000))]) // reap: no zombie/port residue into the retry
     return { ok: false, why: exit ? `child exited before health (code=${exit.code} signal=${exit.signal})` : 'health timeout', log: childLog.join('') }
   }
   const bad = health.artifacts.filter(a => a.expected && !a.activated)
   if (bad.length > 0) {
     child.kill('SIGKILL')
+    await Promise.race([dead, new Promise(r => setTimeout(() => r(null), 3000))]) // reap before retry
     return { ok: false, why: `artifacts failed to activate: ${bad.map(a => `${a.id}(${a.evidence})`).join(', ')}`, log: childLog.join(''), health }
   }
   log(`attempt ${attempt}: HEALTHY (bootId ${bootId.slice(0, 8)}…, artifacts ${health.artifacts.length}/${health.artifacts.length} activated)`)
